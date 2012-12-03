@@ -1,0 +1,264 @@
+#!/usr/bin/perl
+
+# --- SVG 2 SCAD, written by Rene K. Mueller <spiritdude@gmail.com>
+#
+# License: GPLv2
+#
+my $Version = '0.005';
+#
+# History:
+# 2012/08/12: 0.005: -openrot switch, to make first/last coord x-pos the same (rotate_extrude() requires that), see updated README
+# 2012/08/03: 0.003: discovering inconsistancy in path definition, hacking myself to support it
+# 2012/08/02: 0.002: extended with some functionality
+# 2012/08/01: 0.001: first rudimentary version
+
+use Math::Trig;
+use XML::Simple;
+use Math::Bezier;
+use Data::Dumper;
+
+my $done;
+my $me = $0; $me =~ s/^.+\///;
+my %arg;
+
+$| = 1;
+
+$arg{bzsteps} = 32;        # default for steps for bezier curves (curveto in paths)
+
+while($#ARGV>=0) {         # -- old fashion way
+   $_ = shift(@ARGV);
+   $arg{verbose}++, next if($_ eq '-v');
+   $arg{bzsteps} = shift(@ARGV), next if($_ eq '-bzsteps');
+   $arg{openrot}++, next if($_ eq '-openrot');
+   $done++, print "$me $Version" if($_ eq '--version');
+   if(-f $_) {
+      if(/\.svg$/i) {
+         convert($_,%arg);
+         $done++;
+      } else {
+         print STDERR "WARNING: $_ not a .svg file, skipped\n";
+      }
+   }
+}
+
+unless($done) {
+   die "USAGE: $me $Version:\n\t-v\t\tverbose (multiple -v increases verbosity)\n\t--version\tprint version\n\t-bzsteps <num>\tdefine amount steps for bezier curves (default $arg{bzsteps})\n\tfile.svg\tconverts SVG paths to file.scad (existing .scad will be overwritten)\n";
+}
+
+sub convert {
+   my($f,%a) = @_;
+   my $xml = new XML::Simple;
+   my($fout) = $f; $fout =~ s/\.svg$/.scad/;
+   
+   $svg = $xml->XMLin($f);
+   print Dumper($svg) if($arg{verbose});
+   
+   print "$me: $f -> $fout, ";
+   open(FH,">$fout");
+   my(@p) = findPaths($svg->{g});
+   if($#p>=0) {
+      print "",($#p+1)," path",($#p>0?'s':'')," found: ";
+      print FH "union() { " if($#p>0);    # -- formal paths in SVG (could be more!)
+      foreach (@p) {
+         my($n,@o) = decodePath($_,%a);
+         my(@po);
+         if($n>1) {                       # -- multiple paths found in the path (crap definition of SVG!!!)
+            for(my $i=0; $i<$#o; $i++) {
+               if($o[$i]=~/z/i) {         # -- split them apart
+                  dumpPolygon(\@po,fh=>*FH,absolute=>($#p>0?1:0));
+                  @po = ();
+               } else {
+                  push(@po,$o[$i]);
+               }
+            }
+            dumpPolygon(\@po,fh=>*FH,absolute=>($#p>0?1:0),%a) if($#po>=0);
+         
+         } else {
+            dumpPolygon(\@o,fh=>*FH,absolute=>($#p>0?1:0),%a);
+         }
+      }
+      print FH "}\n" if($#p>0);
+   } else {
+      print STDERR "WARNING: no paths found in $f\n";
+   }
+   close(FH);
+   print "done\n";
+}
+
+sub findPaths {                  # -- we walk recursively to find <something d=""> 
+   my($root) = @_;
+   my(@r);
+   if(ref($root) eq 'HASH') {
+      foreach (keys %{$root}) {
+         push(@r,findPaths($root->{$_})) unless($_ eq 'd');
+      }
+   }
+   if($root->{d}) {
+      push(@r,$root->{d});
+   }
+   return @r;
+}
+
+sub dumpPolygon {
+   my($o,%a) = @_;
+   my($fh) = $a{fh};
+
+   if($#{$o}<0) {
+      print STDERR "WARNING: couldn't find paths in SVG-file, make sure all objects are converted to path\n";
+      return;
+   }
+   print "boundary x: $minx - $maxx, y: $miny - $maxy\n" if($arg{verbose});
+   unless($a{absolute}) {
+      print "realign to 0,0\n" if($arg{verbose});
+      for(my $i=0; $i<=$#$o; $i+=2) {      # --- realign to 0,0
+         $$o[$i] -= $minx;
+         $$o[$i+1] -= $miny;
+         $$o[$i+1] = ($maxy-$miny) - $$o[$i+1];   # -- reverse y (2d graphics 0,0 upper-left corner, 3d graphics lower-left corner)
+      }
+   }
+   if($a{openrot}) {
+      $$o[$#o-1] = $$o[0];  # last coordinate x-pos = x-pos of first point
+   }
+   print $fh "polygon ( points=[";
+   my $i;
+   while(@$o) {
+      print $fh "," if($i++);
+      print $fh "[",join(',',splice(@$o,0,2)),"]";
+   }
+   print $fh "] );\n";
+}
+
+sub decodePath {
+   # -- reference: http://www.w3.org/TR/SVG/paths.html#PathData
+   #               http://commons.oreilly.com/wiki/index.php/SVG_Essentials/Paths
+   # ---- example: "m -205.71429,23.790754 c 0,0 225.71429,11.428571 305.71429,154.285716 52.47585,93.70687 25.71428,202.85714 25.71428,202.85714 L 62.857143,478.07647 60,386.6479 l -51.4285714,0 -2.8571429,311.42856 -57.1428577,2.85715 c 0,0 14.285715,-431.42857 -22.857142,-511.42857 -37.142856,-80 -131.428576,37.14286 -131.428576,37.14286";
+   my($d,%a) = @_;
+   
+   my(@s) = split /[,\s]+/, $d;
+   my($xp,$yp) = (0,0);
+   my($lc);
+   my($pn,$pc,@o);
+   my($lxp,$lyp);
+   
+   $minx = 1e38, $miny = 1e38;                  # --- global vars for now, for sake of simplicity
+   $maxx = -1e38, $maxy = -1e38;
+
+   $a{csteps} = 64 unless($a{csteps});
+   $a{bzsteps} = 32 unless($a{bzsteps});
+   $a{bzsteps} = 1 if($a{bzsteps}<1);
+
+   $pn++;
+   while($#s>=0) {
+      print "current pos: $xp,$yp\n" if($arg{verbose}>1);
+      if($s[0]=~/^[a-z]/i) {
+         $c = shift(@s);
+         print "command <$c>\n" if($arg{verbose}>1);
+      } else {
+         $c = $lc;
+         print "command <$c> again\n" if($arg{verbose}>1);
+      }
+      if($c eq 'm'||$c eq 'M') {
+         # -- moveto
+         my($x,$y) = getArgs(\@s,2);
+         $xp += $x, $yp += $y if($c eq 'm');
+         $xp = $x, $yp = $y if($c eq 'M');
+         pushPoint(\@o,$xp,$yp); $pc++;
+         $lxp = $xp, $lyp = $yp if($lc ne $c);     # --- set origin coordinate for a sequence of multiple commands 
+                                                   #     used when we 'z' (end a path) - yes, SVG path can have multiple paths inside!
+         
+      } elsif($c eq 'l'||$c eq 'L') {
+         # -- lineto
+         my($x,$y) = getArgs(\@s,2);
+         $xp += $x, $yp += $y if($c eq 'l');
+         $xp = $x, $yp = $y if($c eq 'L');
+         pushPoint(\@o,$xp,$yp); $pc++;
+          
+      } elsif($c eq 'c'||$c eq 'C') {
+         # -- curveto 
+         my($steps) = $a{bzsteps};
+         my($x1,$y1,$x2,$y2,$x,$y) = getArgs(\@s,6);
+         if($c eq 'c') {
+            $x1 += $xp; $y1 += $yp;
+            $x2 += $xp; $y2 += $yp;
+            $x += $xp; $y += $yp;
+         }
+         # -- see http://search.cpan.org/~abw/Math-Bezier-0.01/Bezier.pm
+         my $b = Math::Bezier->new($xp,$yp,$x1,$y1,$x2,$y2,$x,$y);
+         my($_x,$_y);
+
+         for(my $i = 0; $i <= $steps; $i++) {
+            my $r = $i/$steps;
+            ($_x,$_y) = $b->point($r);
+            print "\t$_x,$_y ($r)\n" if($arg{verbose}>1);
+            pushPoint(\@o,$_x,$_y); $pc++;
+         }
+         $xp = $_x; $yp = $_y;
+      
+      } elsif($c eq 'h'||$c eq 'H') {
+         # -- hlineto
+         my($x) = getArgs(\@s,1);
+         $xp += $x if($c eq 'h');
+         $xp = $x if($c eq 'H');
+         pushPoint(\@o,$xp,$yp); $pc++;
+         
+      } elsif($c eq 'v'||$c eq 'V') {
+         # -- vlineto
+         my($y) = getArgs(\@s,1);
+         $yp += $y if($c eq 'v');
+         $yp = $y if($c eq 'V');
+         pushPoint(\@o,$xp,$yp); $pc++;
+         
+      } elsif($c eq 'q'||$c eq 'Q') {
+         my($x1,$y1,$x,$y) = getArgs(\@s,4);
+         print STDERR "<$c> command is not yet implemented, skipped\n";
+
+      } elsif($c eq 's'||$c eq 'S') {
+         my($x2,$y2,$x,$y) = getArgs(\@s,4);
+         print STDERR "<$c> command is not yet implemented, skipped\n";
+
+      } elsif($c eq 't'||$c eq 'T') {
+         my($x,$y) = getArgs(\@s,2);
+         print STDERR "<$c> command is not yet implemented, skipped\n";
+
+      } elsif($c eq 'a'||$c eq 'A') {
+         my($rx,$ry,$xa,$laf,$sf,$x,$y) = getArgs(\@s,7);
+         print STDERR "<$c> command is not yet implemented, skipped\n";
+
+      } elsif($c eq 'z'||$c eq 'Z') {
+         push(@o,$c);         # -- we push the command on the coord stack, so we know where to split
+
+         $xp = $lxp; $yp = $lyp;       
+         # -- reset coord from first move 
+         #    (e.g. inkscape encodes letter 'i' converted to path, as one path with multiple moves 
+         #     and 2x 'z' to draw the two polygon - not sure if this according specs, as [m]oves do 
+         #     not draw lines, instead [l]ineto should be used)
+
+         $pn++;
+         
+      } else {
+         print STDERR "<$c> is not a command\n";
+         last;
+      }
+      $lc = $c;
+   }
+   print "$pc points, "; # if($arg{verbose});
+   return($pn,@o);
+}
+
+sub pushPoint {
+   my($o,$x,$y) = @_;
+   $minx = $x if($minx>$x);
+   $miny = $y if($miny>$y);
+   $maxx = $x if($maxx<$x);
+   $maxy = $y if($maxy<$y);
+   push($o,$x,$y);
+}
+
+sub getArgs {
+   my($a,$n) = @_;
+   $n = 1 unless($n);
+   @_ = splice($a,0,$n);
+   print "\targs = ".join(',',@_),"\n" if($arg{verbose}>1);
+   return @_;
+}
+
