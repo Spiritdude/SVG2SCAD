@@ -6,6 +6,9 @@ dist::
 backup::
 	cd ..; cp svg2scad-${VERSION}.tar.gz ~/Backup/; cp svg2scad-${VERSION}.tar.gz ~/Dropbox/; scp svg2scad-${VERSION}.tar.gz the-labs.com:Backup/
 
+requirements::
+	sudo cpan Math::Bezier
+
 install::
 	cp svg2scad /usr/bin/
 

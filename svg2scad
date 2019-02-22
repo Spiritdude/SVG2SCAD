@@ -4,9 +4,10 @@
 #
 # License: GPLv2
 #
-my $Version = '0.005';
+my $Version = '0.006';
 #
 # History:
+# 2019/02/22: 0.006: fixing splice/push to enforce @array reference
 # 2012/08/12: 0.005: -openrot switch, to make first/last coord x-pos the same (rotate_extrude() requires that), see updated README
 # 2012/08/03: 0.003: discovering inconsistancy in path definition, hacking myself to support it
 # 2012/08/02: 0.002: extended with some functionality
@@ -251,13 +252,13 @@ sub pushPoint {
    $miny = $y if($miny>$y);
    $maxx = $x if($maxx<$x);
    $maxy = $y if($maxy<$y);
-   push($o,$x,$y);
+   push(@o,$x,$y);
 }
 
 sub getArgs {
    my($a,$n) = @_;
    $n = 1 unless($n);
-   @_ = splice($a,0,$n);
+   @_ = splice(@{$a},0,$n);
    print "\targs = ".join(',',@_),"\n" if($arg{verbose}>1);
    return @_;
 }
