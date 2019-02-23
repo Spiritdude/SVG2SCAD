@@ -61,7 +61,8 @@ sub convert {
       print "",($#p+1)," path",($#p>0?'s':'')," found: ";
       print FH "union() { " if($#p>0);    # -- formal paths in SVG (could be more!)
       foreach (@p) {
-         my($n,@o) = decodePath($_,%a);
+         my($n,$op) = decodePath($_,%a);
+         my @o = @{$op};
          my(@po);
          if($n>1) {                       # -- multiple paths found in the path (crap definition of SVG!!!)
             for(my $i=0; $i<$#o; $i++) {
@@ -243,7 +244,7 @@ sub decodePath {
       $lc = $c;
    }
    print "$pc points, "; # if($arg{verbose});
-   return($pn,@o);
+   return($pn,\@o);
 }
 
 sub pushPoint {
@@ -252,7 +253,7 @@ sub pushPoint {
    $miny = $y if($miny>$y);
    $maxx = $x if($maxx<$x);
    $maxy = $y if($maxy<$y);
-   push(@o,$x,$y);
+   push(@$o,$x,$y);
 }
 
 sub getArgs {
