@@ -1,9 +1,9 @@
 # SVG2SCAD
 
-svg2scad (0.005) is a perl script and requires some additional modules, which you can install 
+`svg2scad` is a perl script and requires some additional modules, which you can install 
 like this:
 ```
-% cpan XML::Simple Math::Bezier Data::Dumper
+% sudo cpan XML::Simple Math::Bezier Data::Dumper
 ```
 
 that's all.   
@@ -11,7 +11,7 @@ that's all.
 ## Install Script
 
 ```
-% cp svg2scad /usr/bin/
+% sudo cp svg2scad /usr/bin/
 ```
 or
 ```
@@ -22,7 +22,7 @@ or
 
 1) Draw a path in Inkscape, save it as file.svg
 
-2) Run svg2scad
+2) Run `svg2scad`
 
 ```
 % svg2scad file.svg
@@ -42,7 +42,7 @@ and hit F5 to display the polygon, or make a nice extrusion:
 % svg2scad -openrot sample4.svg
 ```
 
-the -openrot switch ensures open polygon prepared for rotational extrusion:
+the `-openrot` switch ensures open polygon prepared for rotational extrusion:
 first and last coordinate x-position to be the same, making a closed volume;
 OpenSCAD otherwise cannot compile and create a STL file.   
    
