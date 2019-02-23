@@ -1,4 +1,4 @@
-= SVG2SCAD =
+# SVG2SCAD
 
 svg2scad (0.005) is a perl script and requires some additional modules, which you can install 
 like this:
@@ -8,7 +8,7 @@ like this:
 
 that's all.   
 
-== Install Script ==
+## Install Script
 
 ```
 % cp svg2scad /usr/bin/
@@ -18,7 +18,7 @@ or
 % sudo make install
 ```
    
-==How to use==
+## How to use
 
 1) Draw a path in Inkscape, save it as file.svg
 
